@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Stack:** Spring Boot 3.4.1 + Java 21, no database — pure in-memory storage.
+**Stack:** Spring Boot 3.4.1 + Java 21, Spring Data JPA, Postgres (Neon).
 
 ```
 Client
@@ -14,7 +14,10 @@ UrlController          (HTTP layer)
 UrlService             (business logic)
   │
   ▼
-ConcurrentHashMap      (in-memory store: shortCode → longUrl)
+UrlRepository          (Spring Data JPA)
+  │
+  ▼
+Postgres / Neon        (persistent store: urls table)
 ```
 
 ---
@@ -32,11 +35,25 @@ Two endpoints:
 
 ### 2. `UrlService` — Business logic
 
-- **`shorten(longUrl)`** — generates a random 6-character alphanumeric code (62 possible chars), tries up to 5 times to find a collision-free slot, then stores `code → longUrl` in the map.
-- **`resolve(code)`** — looks up the code and returns the long URL (as an `Optional`).
-- Uses `ConcurrentHashMap` with `putIfAbsent` for thread-safe writes.
+- **`shorten(longUrl)`** — generates a random 6-character alphanumeric code (62 possible chars), tries up to 5 times to save via the repo; retries on `DataIntegrityViolationException` (short code collision).
+- **`resolve(code)`** — delegates to `UrlRepository.findByShortCode`, returns the long URL as an `Optional`.
 
-### 3. Model records
+### 3. `UrlRepository` — Data access
+
+Spring Data JPA repository on top of `UrlEntity`. Provides `save` and `findByShortCode(String)` out of the box.
+
+### 4. `UrlEntity` — Persistence model
+
+JPA entity mapped to the `urls` table:
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | BIGINT | auto-generated PK |
+| `short_code` | VARCHAR(10) | unique, not null |
+| `long_url` | TEXT | not null |
+| `created_at` | TIMESTAMPTZ | defaults to `Instant.now()` |
+
+### 5. Model records
 
 - `CreateUrlRequest(String longUrl)` — request body
 - `CreateUrlResponse(String shortCode, String shortUrl)` — response body
@@ -51,7 +68,7 @@ Two endpoints:
 POST /api/v1/urls  { "longUrl": "https://example.com/very/long/path" }
   → Controller validates input (not blank)
   → Calls service.shorten()
-  → Service generates 6-char code, stores in map
+  → Service generates 6-char code, saves via UrlRepository (retries on collision)
   → Returns 201 Created: { "shortCode": "aB3xYz", "shortUrl": "http://localhost:8080/aB3xYz" }
 ```
 
@@ -60,7 +77,7 @@ POST /api/v1/urls  { "longUrl": "https://example.com/very/long/path" }
 ```
 GET /aB3xYz
   → Controller calls service.resolve("aB3xYz")
-  → Map lookup returns "https://example.com/very/long/path"
+  → UrlRepository.findByShortCode returns "https://example.com/very/long/path"
   → Returns 302 Found with Location header → browser follows redirect
   → If not found → 404
 ```
@@ -71,8 +88,8 @@ GET /aB3xYz
 
 | Aspect | Current design | Implication |
 |--------|---------------|-------------|
-| Storage | In-memory `ConcurrentHashMap` | All data lost on restart |
+| Storage | Postgres via Neon (Spring Data JPA) | Data survives restarts |
 | Code generation | Random 6-char (62^6 ≈ 56B combinations) | Collision chance is very low |
-| Collision handling | Retry up to 5 times | Throws if all 5 fail (extremely unlikely) |
+| Collision handling | Retry up to 5 times on `DataIntegrityViolationException` | Throws if all 5 fail (extremely unlikely) |
 | Base URL | Hardcoded `localhost:8080` | Not configurable via properties |
-| No persistence | No DB dependency | Simple but not production-ready |
+| DB credentials | Injected via env vars (`DB_URL`, `DB_USER`, `DB_PASSWORD`) | Never committed to source control |
