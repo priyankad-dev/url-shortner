@@ -9,6 +9,7 @@ A minimal URL shortener REST API built with Spring Boot 3 and Java 21.
 - Spring Web, Spring Data JPA, Spring Cache, Spring Actuator
 - Postgres (Neon) — persistent store
 - Redis (Upstash) — read cache (TTL 24h)
+- Resilience4j — circuit breaker on Redis; falls back to Postgres on outage
 
 ## Getting Started
 
@@ -73,6 +74,6 @@ Returns `302 Found` with a `Location` header pointing to the original URL, or `4
 
 - Short codes are 6-character random alphanumeric strings (62^6 ≈ 56 billion combinations).
 - Data is persisted in Postgres — mappings survive restarts.
-- Redis is required — the app will error on requests if Redis is unreachable.
+- Redis is used as a read cache but is not required for correctness — a Resilience4j circuit breaker falls back to Postgres if Redis is unreachable.
 - See [`docs/architecture.md`](docs/architecture.md) for a full architecture breakdown.
 - See [`docs/caching-strategy.md`](docs/caching-strategy.md) for caching design decisions.
