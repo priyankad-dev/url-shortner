@@ -20,8 +20,6 @@ spring:
       ssl:
         enabled: ${REDIS_SSL:true}
   cache:
-    redis:
-      time-to-live: 86400000
     type: redis
 
 resilience4j:
