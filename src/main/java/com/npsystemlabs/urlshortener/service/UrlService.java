@@ -36,13 +36,18 @@ public class UrlService {
     }
 
     public Optional<String> resolve(String code) {
+        if (redisCache.isNotFound(code)) return Optional.empty();   // negative cache hit
+
         String cached = redisCache.get(code);
         if (cached != null) return Optional.of(cached);
 
-        return repo.findByShortCode(code).map(entity -> {
-            redisCache.put(entity.getShortCode(), entity.getLongUrl());
-            return entity.getLongUrl();
-        });
+        Optional<UrlEntity> entity = repo.findByShortCode(code);
+        if (entity.isEmpty()) {
+            redisCache.putNotFound(code);                           // cache the miss
+            return Optional.empty();
+        }
+        redisCache.put(entity.get().getShortCode(), entity.get().getLongUrl());
+        return Optional.of(entity.get().getLongUrl());
     }
 
     private String generateCode() {
